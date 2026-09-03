@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TACET Human Study</title>
+  <style>
+    :root { --ink:#172033; --muted:#64748b; --line:#d9e1ec; --brand:#0f4c81; --bg:#f3f6fa; --panel:#fff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 Arial, "Noto Sans KR", sans-serif; }
+    main { width:min(1800px, calc(100% - 32px)); margin:36px auto 64px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:28px; box-shadow:0 3px 12px #1720330c; }
+    h1 { margin:0 0 8px; font-size:1.65rem; } h2 { font-size:1.15rem; margin:0 0 12px; }
+    .muted { color:var(--muted); } .hidden { display:none !important; }
+    .notice { background:#eff6ff; border-left:4px solid var(--brand); padding:13px 15px; margin:18px 0; }
+    label.check { display:flex; gap:10px; align-items:flex-start; margin:16px 0; cursor:pointer; }
+    button { border:0; border-radius:7px; background:var(--brand); color:#fff; font:inherit; padding:10px 16px; cursor:pointer; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .topline { display:flex; justify-content:space-between; gap:15px; align-items:center; margin-bottom:14px; }
+    .badge { color:var(--brand); font-weight:700; } .progress { color:var(--muted); font-size:.92rem; }
+    .scenario-noise { display:block; color:var(--muted); font-size:.9rem; margin-top:2px; }
+    .scenario-grid { display:grid; grid-template-columns:repeat(5, minmax(220px, 1fr)); gap:16px; align-items:start; }
+    .video-panel { min-width:0; padding:15px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .video-panel h2 { color:var(--brand); }
+    video { width:100%; aspect-ratio:16 / 9; background:#111; border-radius:8px; display:block; }
+    .audio { text-align:center; background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:8px; margin:11px 0 14px; font-weight:700; font-size:.86rem; }
+    .question { padding:13px 0; border-top:1px solid var(--line); }
+    .question:first-of-type { border-top:0; } .en { margin:0 0 2px; font-weight:600; } .ko { margin:0; color:var(--muted); }
+    .scale { display:flex; justify-content:space-between; gap:5px; margin-top:11px; }
+    .scale label { width:calc(100% / 6); text-align:center; font-size:.86rem; cursor:pointer; }
+    .scale input { display:block; margin:0 auto 3px; accent-color:var(--brand); }
+    .scale span { display:block; font-size:.72rem; color:var(--muted); }
+    .legend { display:grid; grid-template-columns:repeat(6, 1fr); margin:5px 0 18px; color:var(--muted); font-size:.72rem; text-align:center; }
+    .error { color:#b42318; margin:12px 0 0; } .success { text-align:center; padding:25px 0; }
+    @media (max-width:1300px) { .scenario-grid { grid-template-columns:repeat(3, minmax(230px, 1fr)); } }
+    @media (max-width:860px) { .scenario-grid { grid-template-columns:repeat(2, minmax(230px, 1fr)); } }
+    @media (max-width:560px) { main { width:min(100% - 18px, 920px); margin:12px auto 28px; } .card { padding:18px; } .scenario-grid { grid-template-columns:1fr; } .scale span { display:none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <section id="welcome" class="card">
+      <h1>TACET 영상 평가</h1>
+      <p>각 영상의 로봇 행동을 관찰한 뒤 네 문항에 응답해 주십시오. 영상에는 실제 오디오가 포함되어 있지 않으며, 보행 소음은 영상 아래의 측정값(dBA)으로 제시됩니다.</p>
+      <div class="notice"><strong>진행 방법</strong><br>네 시나리오가 차례로 제시됩니다. 각 시나리오에서는 다섯 영상을 서로 비교한 뒤, 영상별 네 문항에 0–5점으로 응답해 주십시오. 한 시나리오당 총 20개 응답입니다. 중간에 새로고침해도 같은 기기에서는 진행 상태가 유지됩니다.</div>
+      <p class="muted">0 전혀 동의하지 않음 · 1 동의하지 않음 · 2 약간 동의하지 않음 · 3 약간 동의함 · 4 동의함 · 5 매우 동의함</p>
+      <label class="check"><input id="consent" type="checkbox" /><span>위 안내를 읽었으며, 익명화된 응답이 연구 목적으로 저장·분석되는 것에 동의합니다.</span></label>
+      <button id="start" disabled>평가 시작</button>
+    </section>
+
+    <section id="study" class="card hidden" aria-live="polite">
+      <div class="topline"><div><span id="scenarioTitle" class="badge"></span><span id="scenarioNoise" class="scenario-noise"></span></div><span id="progress" class="progress"></span></div>
+      <form id="survey" class="scenario-grid"></form>
+      <button id="submit">이 시나리오의 20개 응답 저장 및 다음 시나리오</button>
+      <p id="error" class="error" role="alert"></p>
+    </section>
+
+    <section id="complete" class="card hidden success"><h1>응답이 저장되었습니다.</h1><p>참여해 주셔서 감사합니다.</p></section>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // Firebase console > Project settings > Your apps > Web app에서 값을 채우십시오.
+    const firebaseConfig = {
+      apiKey: "AIzaSyDuSJIhQAIapk6cfjmPthBdRGZxuUZdMtk",
+      authDomain: "tacet-human-study.firebaseapp.com",
+      projectId: "tacet-human-study",
+      storageBucket: "tacet-human-study.firebasestorage.app",
+      messagingSenderId: "200008023873",
+      appId: "1:200008023873:web:d6b96075eb137625416bc0"
+    };
+
+    // 방법명은 화면에 표시되지 않으며 결과 저장 시에만 함께 기록됩니다.
+    // src는 저장소 안의 clips/ 폴더에 업로드한 실제 파일명으로 바꾸십시오.
+    const methods = ["Ours", "VLM-Social-Nav", "MUTE", "RPP", "SFM"];
+    const scenarios = [
+      { id:"focused-work", label:"집중 작업 중인 사람", backgroundDbA:49.0, dbA:[50.6,54.9,55.4,57.4,54.5], q4:["The robot did not unnecessarily disturb the person’s work.", "로봇은 그 사람의 작업을 불필요하게 방해하지 않았다."] },
+      { id:"headphones", label:"헤드폰 착용자", backgroundDbA:49.0, dbA:[51.9,54.7,55.3,57.1,54.7], q4:["The robot behaved appropriately around a person wearing headphones.", "로봇은 헤드폰을 착용한 사람 주변에서 적절하게 행동했다."] },
+      { id:"conversation", label:"대화 중인 그룹", backgroundDbA:47.0, dbA:[49.7,54.3,51.9,59.1,54.8], q4:["The robot avoided interrupting the group’s shared conversational space.", "로봇은 그룹이 함께 사용하는 대화 공간을 방해하지 않았다."] },
+      { id:"pedestrian", label:"이동 중인 보행자", backgroundDbA:53.0, dbA:[54.7,57.1,56.8,60.9,58.1], q4:["The pedestrian could continue without having to alter their path to avoid the robot.", "보행자는 로봇을 피하기 위해 자신의 경로를 바꾸지 않고 계속 이동할 수 있었다."] }
+    ];
+
+    const qs = (sc) => [
+      ["The robot maintained a safe and comfortable distance from the " + (sc.id === "conversation" ? "group" : sc.id === "pedestrian" ? "pedestrian" : "person") + ".", "로봇은 " + (sc.id === "conversation" ? "그룹과" : sc.id === "pedestrian" ? "보행자와" : "그 사람과") + " 안전하고 편안한 거리를 유지했다."],
+      ["The robot appropriately adjusted its behavior to the social situation and surroundings.", "로봇은 사회적 상황과 주변 환경에 맞게 자신의 행동을 적절히 조정했다."],
+      ["The reported footstep-noise level was appropriate for this " + (sc.id === "pedestrian" ? "outdoor" : "quiet indoor") + " setting.", "제시된 로봇의 보행 소음 수준은 이 " + (sc.id === "pedestrian" ? "실외" : "조용한 실내") + " 환경에 적절했다."],
+      sc.q4
+    ];
+    const clips = scenarios.flatMap(sc => methods.map((method, i) => ({
+      blindId: `Video ${String(scenarios.indexOf(sc) * methods.length + i + 1).padStart(2, "0")}`,
+      scenario: sc.id, method, dbA: sc.dbA[i], src: `clips/${sc.id}-${i + 1}.mp4`, questions: qs(sc)
+    })));
+
+    const $ = (id) => document.getElementById(id);
+    const key = "tacet-human-study-v2";
+    const state = JSON.parse(localStorage.getItem(key) || "null") || { participantId: crypto.randomUUID(), groups: makeGroups(clips), index: 0 };
+    localStorage.setItem(key, JSON.stringify(state));
+    let db, authReady = false;
+
+    function shuffle(items) {
+      const shuffled = [...items];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    }
+    function makeGroups(items) {
+      return shuffle(scenarios.map(sc => ({
+        id: sc.id, label: sc.label, backgroundDbA: sc.backgroundDbA, clips: shuffle(items.filter(v => v.scenario === sc.id))
+      })));
+    }
+    function render() {
+      if (state.index >= state.groups.length) { $("study").classList.add("hidden"); $("complete").classList.remove("hidden"); return; }
+      const group = state.groups[state.index];
+      $("scenarioTitle").textContent = group.label;
+      $("scenarioNoise").textContent = `Background noise / 배경 소음: ${Number(group.backgroundDbA).toFixed(1)} dBA`;
+      $("progress").textContent = `시나리오 ${state.index + 1} / ${state.groups.length} · 영상 5개 비교`;
+      $("survey").innerHTML = group.clips.map(v => {
+        const token = v.blindId.replace(" ", "_");
+        return `<article class="video-panel"><h2>${v.blindId}</h2><video controls controlsList="nodownload" preload="metadata" src="${v.src}"><p>이 브라우저는 영상을 재생할 수 없습니다.</p></video><div class="audio">Reported footstep-noise level<br>제시된 보행 소음 수준: ${Number(v.dbA).toFixed(1)} dBA</div>${v.questions.map((q, i) => `<div class="question"><p class="en">Q${i+1}. ${q[0]}</p><p class="ko">${q[1]}</p><div class="scale">${[0,1,2,3,4,5].map(n => `<label><input required type="radio" name="${token}_q${i+1}" value="${n}"><b>${n}</b><span>${["전혀 아님","아님","약간 아님","약간 동의","동의","매우 동의"][n]}</span></label>`).join("")}</div></div>`).join("")}</article>`;
+      }).join("");
+      $("error").textContent = "";
+    }
+    async function connect() {
+      const app = initializeApp(firebaseConfig); db = getFirestore(app); const auth = getAuth(app); await signInAnonymously(auth); authReady = true;
+    }
+    $("consent").addEventListener("change", (e) => $("start").disabled = !e.target.checked);
+    $("start").addEventListener("click", async () => {
+      $("start").disabled = true;
+      try { await connect(); $("welcome").classList.add("hidden"); $("study").classList.remove("hidden"); render(); }
+      catch (e) { $("start").disabled = false; alert("설문 저장 연결을 시작하지 못했습니다. Firebase 설정값을 확인해 주십시오."); console.error(e); }
+    });
+    $("submit").addEventListener("click", async () => {
+      const form = $("survey"); if (!form.reportValidity()) return;
+      if (!authReady) return; const group = state.groups[state.index]; const data = new FormData(form);
+      $("submit").disabled = true;
+      try {
+        await Promise.all(group.clips.map((v, videoIndex) => {
+          const token = v.blindId.replace(" ", "_");
+          return setDoc(doc(db, "responses", `${state.participantId}_${token}`), {
+            participant_id: state.participantId, scenario_presentation_order: state.index + 1, within_scenario_video_order: videoIndex + 1,
+            blind_video_id: v.blindId, scenario_id: v.scenario, method_id: v.method, footstep_noise_dba: v.dbA,
+            q1: Number(data.get(`${token}_q1`)), q2: Number(data.get(`${token}_q2`)), q3: Number(data.get(`${token}_q3`)), q4: Number(data.get(`${token}_q4`)), submitted_at: serverTimestamp()
+          });
+        }));
+        state.index++; localStorage.setItem(key, JSON.stringify(state)); render();
+      } catch (e) { $("error").textContent = "응답 저장에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주십시오."; console.error(e); }
+      finally { $("submit").disabled = false; }
+    });
+  </script>
+</body>
+</html>
